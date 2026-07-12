@@ -1,0 +1,1 @@
+Streamlit course recommender serving 9 recommendation models (course similarity, user profile, clustering, KNN, NMF and embedding models) with an interactive UI to pick courses, compare models and get personalized course recommendations.
