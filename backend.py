@@ -21,10 +21,17 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 # corrupt or pollute the dataset file.
 _session_ratings = None
 
+# Temporary in-memory replacement for the ratings, used by simple_evaluation
+# to feed each model a train-only hold-out split WITHOUT touching the CSV on
+# disk. When set, load_ratings returns this verbatim (session rows ignored).
+_ratings_override = None
+
 
 # ── Data loaders ──────────────────────────────────────────────────────────────
 
 def load_ratings() -> pd.DataFrame:
+    if _ratings_override is not None:
+        return _ratings_override.copy()
     df = pd.read_csv(os.path.join(DATA_DIR, "ratings.csv"))
     if _session_ratings is not None:
         df = pd.concat([df, _session_ratings], ignore_index=True)

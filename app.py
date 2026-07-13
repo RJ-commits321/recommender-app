@@ -47,13 +47,12 @@ def init_recommender_app():
     gb = GridOptionsBuilder.from_dataframe(course_df)
     gb.configure_default_column(enablePivot=True, enableValue=True, enableRowGroup=True)
     gb.configure_selection(selection_mode="multiple", use_checkbox=True)
-    gb.configure_side_bar()
     grid_options = gb.build()
 
     response = AgGrid(
         course_df,
         gridOptions=grid_options,
-        enable_enterprise_modules=True,
+        enable_enterprise_modules=False,
         update_mode=GridUpdateMode.MODEL_CHANGED,
         data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
         fit_columns_on_grid_load=False,

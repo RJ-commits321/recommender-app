@@ -3,9 +3,10 @@ Model 7 – Regression with Embedding Features
 ----------------------------------------------
 IBM ML Capstone approach (lab_jupyter_cf_regression_w_embeddings):
 
-Trains a Ridge regressor on interaction vectors (user_emb ∥ course_emb)
-to predict the rating value. Recommends courses with the highest
-predicted scores.
+Trains a Ridge regressor on interaction vectors (user_emb * course_emb,
+element-wise) to predict the rating value. Recommends courses with the
+highest predicted scores. The element-wise product (not concatenation)
+is what makes the ranking differ per user — see _build_training_data.
 
 Cold-start fix for new users (course selections from UI):
   New users have no row in user_embeddings.csv. Instead of the global
@@ -68,7 +69,15 @@ def _build_training_data():
     df = df.merge(_course_emb_df.reset_index(), on="item", how="inner")
     df.dropna(inplace=True)
 
-    X = df[U_FEAT_COLS + C_FEAT_COLS].values.astype(float)
+    # Element-wise product of the user and course embeddings (16-dim), NOT
+    # concatenation. With concatenation the linear model score splits into
+    # a user term + a course term that never interact, so for a fixed user
+    # the course ranking is identical for everyone. The product lets each
+    # user's dimensions scale the course's dimensions, so the ranking is
+    # genuinely personalised (this is the interaction the lab intends).
+    U = df[U_FEAT_COLS].values.astype(float)
+    C = df[C_FEAT_COLS].values.astype(float)
+    X = U * C
     y = df["rating"].values.astype(float)
     return X, y
 
@@ -113,7 +122,7 @@ def predict(user_ids: list, params: dict = None) -> pd.DataFrame:
         for course_id, c_row in _course_emb_df.iterrows():
             if course_id in enrolled_set:
                 continue
-            interaction = np.concatenate([u_vec, c_row.values.astype(float)]).reshape(1, -1)
+            interaction = (u_vec * c_row.values.astype(float)).reshape(1, -1)
             raw_scores[course_id] = float(_reg_model.predict(interaction)[0])
 
         if not raw_scores:

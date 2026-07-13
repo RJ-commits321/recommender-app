@@ -2,7 +2,9 @@
 Model 8 – Classification with Embedding Features
 --------------------------------------------------
 Trains a Logistic Regression classifier on interaction vectors
-(user_emb ∥ course_emb) to predict whether a user will complete a course.
+(user_emb * course_emb, element-wise) to predict whether a user will
+complete a course. The element-wise product (not concatenation) is what
+makes P(completion) differ per user — see _build_training_data.
 
 Labels:
   rating 3.0 → 1 (completed)
@@ -69,7 +71,13 @@ def _build_training_data():
     # Any other rating value also maps to 0 (conservative)
     df["label"] = (df["rating"] == 3.0).astype(int)
 
-    X = df[U_FEAT_COLS + C_FEAT_COLS].values.astype(float)
+    # Element-wise product of user and course embeddings (16-dim), NOT
+    # concatenation — see regression_embedding._build_training_data for why.
+    # Concatenation into a linear model gives every user the same course
+    # ranking; the product makes P(completion) genuinely user-specific.
+    U = df[U_FEAT_COLS].values.astype(float)
+    C = df[C_FEAT_COLS].values.astype(float)
+    X = U * C
     y = df["label"].values.astype(int)
     return X, y
 
@@ -117,7 +125,7 @@ def predict(user_ids: list, params: dict = None) -> pd.DataFrame:
         for course_id, c_row in _course_emb_df.iterrows():
             if course_id in enrolled_set:
                 continue
-            interaction = np.concatenate([u_vec, c_row.values.astype(float)]).reshape(1, -1)
+            interaction = (u_vec * c_row.values.astype(float)).reshape(1, -1)
             prob = float(_clf_model.predict_proba(interaction)[0][class_idx])
             raw_scores[course_id] = prob
 
