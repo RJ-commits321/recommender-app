@@ -1,4 +1,7 @@
-numpy
+# numpy pinned <2: streamlit 1.32.0 and streamlit-aggrid 0.2.2-2 predate
+# numpy 2.0 and crash on import against it. (scikit-surprise used to hold
+# numpy back implicitly; it was removed, so this makes the cap explicit.)
+numpy<2
 pandas
 streamlit==1.32.0
 streamlit-aggrid==0.2.2-2
