@@ -61,7 +61,6 @@ import pandas as pd
 import backend
 
 DATA_DIR     = os.path.join(os.path.dirname(__file__), "data")
-RATINGS_PATH = os.path.join(DATA_DIR, "ratings.csv")
 GENRE_PATH   = os.path.join(DATA_DIR, "course_genre.csv")
 PROFILE_PATH = os.path.join(DATA_DIR, "user_profile.csv")
 
@@ -114,12 +113,19 @@ def _build_shared_holdout(n_users: int, test_ratio: float, seed: int):
 
 
 def _write_holdout_ratings(full_ratings, sampled_users, train_df):
+    """Make load_ratings return the train-only split, IN MEMORY only.
+
+    Sampled users keep just their training items; everyone else keeps all
+    their ratings. Nothing is written to ratings.csv on disk, so an
+    interrupted eval or a concurrent run can never corrupt the dataset file.
+    """
     other = full_ratings[~full_ratings["user"].isin(sampled_users)]
-    pd.concat([other, train_df], ignore_index=True).to_csv(RATINGS_PATH, index=False)
+    backend._ratings_override = pd.concat([other, train_df], ignore_index=True)
 
 
 def _restore_ratings(full_ratings):
-    full_ratings.to_csv(RATINGS_PATH, index=False)
+    """Clear the in-memory override so load_ratings reads the real CSV again."""
+    backend._ratings_override = None
 
 
 # ── Cache resets so each model retrains cleanly on the hold-out data ───────────
