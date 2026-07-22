@@ -1,6 +1,5 @@
 import streamlit as st
 import pandas as pd
-import time
 import backend
 
 from st_aggrid import AgGrid
@@ -15,37 +14,25 @@ st.set_page_config(
 
 
 # ── Cached loaders ─────────────────────────────────────────────────────────────
-@st.cache_data
-def load_ratings():
-    return backend.load_ratings()
-
-@st.cache_data
-def load_course_sims():
-    return backend.load_course_sims()
-
+# Only the course catalogue is cached: it's the one dataset the UI itself
+# renders (grid + results merge). The models call backend.load_* directly,
+# so caching ratings/sims/bow here would buy nothing — and a cached ratings
+# copy would go stale as soon as a session user is added.
 @st.cache_data
 def load_courses():
     return backend.load_courses()
 
-@st.cache_data
-def load_bow():
-    return backend.load_bow()
-
 
 # ── App init ───────────────────────────────────────────────────────────────────
 def init_recommender_app():
-    with st.spinner("Loading datasets..."):
-        load_ratings()
-        load_course_sims()
+    with st.spinner("Loading course catalogue..."):
         course_df = load_courses()
-        load_bow()
 
-    st.success("Datasets loaded successfully.")
+    st.success("Course catalogue loaded.")
     st.markdown("---")
     st.subheader("Select courses that you have audited or completed:")
 
     gb = GridOptionsBuilder.from_dataframe(course_df)
-    gb.configure_default_column(enablePivot=True, enableValue=True, enableRowGroup=True)
     gb.configure_selection(selection_mode="multiple", use_checkbox=True)
     grid_options = gb.build()
 
@@ -70,14 +57,12 @@ def init_recommender_app():
 # ── Train / Predict helpers ────────────────────────────────────────────────────
 def train(model_name, params):
     with st.spinner("Training..."):
-        time.sleep(0.5)
         backend.train(model_name, params)
     st.success("Training complete!")
 
 
 def predict(model_name, user_ids, params):
     with st.spinner("Generating recommendations..."):
-        time.sleep(0.5)
         res = backend.predict(model_name, user_ids, params)
     st.success("Recommendations generated!")
     return res
@@ -123,24 +108,42 @@ elif model_selection == backend.MODELS[8]:
     params["top_courses"] = st.sidebar.slider("Top courses", 1, 50, 10)
 
 st.sidebar.subheader("3. Train")
-if st.sidebar.button("Train Model"):
-    train(model_selection, params)
+# Course Similarity and User Profile score on the fly — there is nothing to
+# fit, so showing a Train button (and a "Training complete!" toast) for them
+# would be misleading.
+if model_selection in (backend.MODELS[0], backend.MODELS[1]):
+    st.sidebar.caption("This model needs no training — go straight to Predict.")
+else:
+    if st.sidebar.button("Train Model"):
+        train(model_selection, params)
 
 st.sidebar.subheader("4. Predict")
 if st.sidebar.button("Recommend New Courses"):
     if selected_courses_df.shape[0] == 0:
         st.warning("Please select at least one course first.")
+        st.session_state.pop("recommendations", None)
     else:
-        new_id = backend.add_new_ratings(selected_courses_df["COURSE_ID"].values)
-        res_df = predict(model_selection, [new_id], params)
-        if res_df.empty:
-            st.warning("No recommendations found. Try adjusting hyper-parameters.")
-        else:
-            res_df    = res_df[["COURSE_ID", "SCORE"]]
-            course_df = load_courses()
-            res_df    = pd.merge(res_df, course_df, on="COURSE_ID").drop("COURSE_ID", axis=1)
-            st.subheader(f"Recommended Courses — {model_selection}")
-            st.table(res_df)
+        # Reuse this browser session's user id so repeated clicks refresh the
+        # same user instead of piling up a new phantom user each time.
+        new_id = backend.add_new_ratings(
+            selected_courses_df["COURSE_ID"].values,
+            user_id=st.session_state.get("session_user_id"),
+        )
+        st.session_state["session_user_id"] = new_id
+        st.session_state["recommendations"] = predict(model_selection, [new_id], params)
+        st.session_state["rec_model"] = model_selection
+
+# Rendered outside the button block so results survive the rerun that any
+# widget change triggers (moving a slider would otherwise blank the table).
+_res_df = st.session_state.get("recommendations")
+if _res_df is not None:
+    if _res_df.empty:
+        st.warning("No recommendations found. Try adjusting hyper-parameters.")
+    else:
+        _out = _res_df[["COURSE_ID", "SCORE"]]
+        _out = pd.merge(_out, load_courses(), on="COURSE_ID").drop("COURSE_ID", axis=1)
+        st.subheader(f"Recommended Courses — {st.session_state.get('rec_model', '')}")
+        st.table(_out)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -164,7 +167,7 @@ if st.sidebar.button("Recommend New Courses"):
 #         ["Clustering",                               "Hit Rate@K, Silhouette", "Top-K slider"],
 #         ["Clustering with PCA",                      "Hit Rate@K, Silhouette", "Top-K slider"],
 #         ["KNN",                                      "Hit Rate@K",            "Top-K slider"],
-#         ["NMF",                                      "RMSE, MAE",             "—"],
+#         ["NMF",                                      "Hit Rate@K",            "Top-K slider"],
 #         ["Neural Network",                           "RMSE, MAE",             "—"],
 #         ["Regression with Embedding Features",       "RMSE, MAE",             "—"],
 #         ["Classification with Embedding Features",   "AUC-ROC, Accuracy",     "—"],
@@ -182,7 +185,7 @@ if st.sidebar.button("Recommend New Courses"):
 #         "Top-K",
 #         5, 20, 10, key="simple_eval_k",
 #         help="Only affects the Hit Rate metric of Clustering, Clustering+PCA, "
-#              "and KNN (checks if any held-out course appears in the top K "
+#              "KNN and NMF (checks if any held-out course appears in the top K "
 #              "recommendations). All other models below ignore this setting."
 #     )
 
@@ -225,7 +228,7 @@ if st.sidebar.button("Recommend New Courses"):
 #         st.caption(
 #             "Course Similarity / User Profile: no hold-out, measured directly. "
 #             "Clustering / Clustering+PCA: Hit Rate@K + Silhouette (structural). "
-#             "KNN: Hit Rate@K (scores are neighbourhood fractions, not ratings). "
-#             "NMF / Neural Network / Regression: RMSE + MAE vs actual rating. "
+#             "KNN / NMF: Hit Rate@K (scores are normalized 0-1, not ratings). "
+#             "Neural Network / Regression: RMSE + MAE vs actual rating. "
 #             "Classification: AUC-ROC + Accuracy (probability of completion)."
 #         )

@@ -63,26 +63,32 @@ def get_doc_dicts():
     return idx_id_dict, id_idx_dict
 
 
-def add_new_ratings(new_courses) -> int:
-    """Register a new user with rating 3.0 for each selected course.
+def add_new_ratings(new_courses, user_id: int = None) -> int:
+    """Register (or refresh) a session user with rating 3.0 per selected course.
 
-    The rows live in memory only (picked up by load_ratings); the CSV on
-    disk is left untouched.
+    Pass the id returned by a previous call as `user_id` to REPLACE that
+    user's rows instead of creating another one — otherwise every click
+    would mint a new phantom user. The rows live in memory only (picked up
+    by load_ratings); the CSV on disk is left untouched.
     """
     global _session_ratings
     if len(new_courses) == 0:
         return None
-    ratings_df = load_ratings()
-    new_id     = int(ratings_df["user"].max()) + 1
-    new_rows   = pd.DataFrame({
+
+    new_id = int(load_ratings()["user"].max()) + 1 if user_id is None else int(user_id)
+    new_rows = pd.DataFrame({
         "user":   [new_id] * len(new_courses),
         "item":   list(new_courses),
         "rating": [3.0]   * len(new_courses),
     })
+
     if _session_ratings is None:
         _session_ratings = new_rows
     else:
-        _session_ratings = pd.concat([_session_ratings, new_rows], ignore_index=True)
+        # Drop any previous rows for this user so a changed selection replaces
+        # the old one rather than accumulating alongside it.
+        kept = _session_ratings[_session_ratings["user"] != new_id]
+        _session_ratings = pd.concat([kept, new_rows], ignore_index=True)
     return new_id
 
 
